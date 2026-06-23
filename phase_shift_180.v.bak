@@ -1,0 +1,38 @@
+// 12位有符号数180°移相模块（基于延迟半个周期实现）
+module phase_shift_180 (
+    input                   clk,        // 20MHz系统时钟
+    input                   rst_n,      // 低电平复位
+    input  signed [11:0]    din,        // 12位有符号输入信号（ADC采集数据）
+    output signed [11:0]    dout        // 12位有符号移相后输出信号
+);
+
+// 定义参数：半个周期对应的时钟数（核心参数）
+// 信号频率2MHz → 周期500ns；系统时钟20MHz → 周期50ns；半个周期=250ns=5个时钟
+localparam HALF_PERIOD_CLK = 5;
+
+// 深度为5的寄存器缓冲区（存储半个周期的数据，12位有符号类型）
+reg signed [11:0] delay_buf [0:HALF_PERIOD_CLK-1];
+
+// 时序逻辑：缓冲区移位更新（显式赋值，易综合、易时序分析）
+always @(posedge clk or negedge rst_n) begin
+    if(!rst_n) begin
+        // 显式清零（替代for循环，提升综合兼容性）
+        delay_buf[0] <= 12'sd0;
+        delay_buf[1] <= 12'sd0;
+        delay_buf[2] <= 12'sd0;
+        delay_buf[3] <= 12'sd0;
+        delay_buf[4] <= 12'sd0;
+    end else begin
+        // 显式移位：每一位依次承接前一位的旧值（非阻塞赋值保证并行采样）
+        delay_buf[0] <= din;          // 最新ADC数据写入缓冲区第0位
+        delay_buf[1] <= delay_buf[0]; // 第0位数据移至第1位（延迟1个时钟）
+        delay_buf[2] <= delay_buf[1]; // 第1位数据移至第2位（延迟2个时钟）
+        delay_buf[3] <= delay_buf[2]; // 第2位数据移至第3位（延迟3个时钟）
+        delay_buf[4] <= delay_buf[3]; // 第3位数据移至第4位（延迟4个时钟）
+    end
+end
+
+// 输出：延迟5个时钟周期的数据（恰好半个信号周期，实现180°移相）
+assign dout = delay_buf[HALF_PERIOD_CLK-1]; // 取缓冲区最后一位（delay_buf[4]）
+
+endmodule

@@ -1,0 +1,67 @@
+// 顶层模块：整合ADC采集、相位偏移、DAC输出及PLL时钟管理测试
+module top(
+    // 外部输入端口
+    input               inclk0_sig,      // 外部输入时钟（如晶振，接入PLL的inclk0）
+    input               rst_n,           // 系统全局复位（低电平有效，PLL和所有子模块共用）
+    input   signed [11:0] adc_data,     // ADC硬件输入的12位有符号并行数据
+    
+    // 外部输出端口
+    output              adc_clk_sample,  // 输出到ADC硬件的采样时钟（20MHz）
+    output              dac_clk,         // 输出到DAC硬件的更新时钟（20MHz）
+    output  signed [7:0] dac_data_out    // 【修正】去掉reg关键字，默认wire线网类型
+);
+
+// -------------------------- 内部信号定义 --------------------------
+wire            areset_sig;        // PLL复位信号（PLL的areset为高电平有效，需转换）
+wire            pll_20m;           // PLL生成的20MHz核心时钟
+wire signed [11:0] adc_out;        // ADC驱动模块锁存后的12位数据
+wire signed [11:0] phase_shifted_data; // 180°移相后的12位数据
+wire signed [7:0]  dac_data_in;    // 位宽转换后输入DAC驱动的8位数据
+
+// -------------------------- 复位信号转换 --------------------------
+// 系统rst_n（低有效）→ PLL areset（高有效），保证PLL与系统复位同步
+assign areset_sig = ~rst_n;
+
+// -------------------------- 时钟分配 --------------------------
+// ADC/DAC时钟均由PLL生成的20MHz时钟提供，输出到硬件
+assign adc_clk_sample = pll_20m;
+assign dac_clk = pll_20m;
+
+// -------------------------- 位宽适配（12位→8位） --------------------------
+// 12位有符号数转8位：保留符号位，截取高8位（丢弃低4位），保证符号不丢失
+// 12位格式：[11]符号位，[10:0]数据位 → 8位格式：[7]符号位，[6:0]数据位
+assign dac_data_in = phase_shifted_data[11:4];
+
+// -------------------------- 子模块例化 --------------------------
+// 1. PLL IP核：生成20MHz系统时钟
+pll pll_inst (
+    .areset ( areset_sig ),  // PLL复位（高有效）
+    .inclk0 ( inclk0_sig ),  // 外部输入时钟
+    .c0     ( pll_20m )      // 输出20MHz时钟（核心时钟）
+);
+
+// 2. ADC驱动模块：锁存ADC输入数据，消亚稳态
+adc_driver adc_driver_inst (
+    .clk_sample ( adc_clk_sample ), // ADC采样时钟=20MHz
+    .rst_n      ( rst_n ),          // 系统复位（低有效）
+    .adc_data   ( adc_data ),       // ADC原始输入数据
+    .adc_out    ( adc_out )         // 锁存后的ADC数据
+);
+
+// 3. 180°移相模块：对ADC数据延迟半个周期（2MHz信号对应5个20MHz时钟）
+phase_shift_180 phase_shift_180_inst (
+    .clk        ( pll_20m ),        // 20MHz时钟
+    .rst_n      ( rst_n ),          // 系统复位（低有效）
+    .din        ( adc_out ),        // 输入：锁存后的ADC数据
+    .dout       ( phase_shifted_data ) // 输出：180°移相后的数据
+);
+
+// 4. DAC驱动模块：锁存输入数据，消亚稳态后输出到DAC硬件
+dac_driver dac_driver_inst (
+    .clk        ( dac_clk ),        // DAC时钟=20MHz
+    .rst_n      ( rst_n ),          // 系统复位（低有效）
+    .dac_data_in ( dac_data_in ),   // 输入：位宽转换后的8位数据
+    .dac_data_out ( dac_data_out )  // 【修正】子模块输出直接驱动wire类型的顶层端口，符合语法
+);
+
+endmodule

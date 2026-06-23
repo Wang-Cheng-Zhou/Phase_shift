@@ -1,0 +1,20 @@
+module dac_driver(
+    input              clk,            // 系统时钟（DAC数据更新时钟）
+    input               rst_n,          // 复位信号：低电平有效（与系统/ADC保持一致）
+    input   signed [7:0]  dac_data_in,  // DAC 8位有符号并行输入数据
+    output reg signed [7:0] dac_data_out // 锁存后的8位有符号DAC数据（硬件接DAC的D0~D7）
+);
+
+// -------------------------- 核心输出逻辑 --------------------------
+// 单级寄存器同步锁存（消亚稳态），延迟1个时钟周期
+// 注：同步时钟域下，一级寄存器可有效降低亚稳态概率；若输入数据异步性强，可扩展为两级
+always@(posedge clk or negedge rst_n) begin
+    if(!rst_n) begin
+        dac_data_out <= 8'sd0;  // 复位时输出置0（8位有符号数，避免DAC输出异常电平）
+    end else begin
+        // 同步锁存输入数据到系统时钟域，保证DAC采样数据稳定
+        dac_data_out <= dac_data_in;
+    end
+end
+
+endmodule
